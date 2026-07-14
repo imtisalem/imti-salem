@@ -1,0 +1,34 @@
+[
+  {
+    "section": "Graduation",
+    "id": "default-1",
+    "src": "/1.jpg",
+    "alt": "IMTI graduation batch with dual certificates",
+    "caption": "Graduation Day",
+    "uploadedAt": ""
+  },
+  {
+    "section": "Classroom",
+    "id": "default-4",
+    "src": "/4.jpg",
+    "alt": "Children in a Montessori activity circle",
+    "caption": "Classroom Activities",
+    "uploadedAt": ""
+  },
+  {
+    "section": "Events",
+    "id": "default-3",
+    "src": "/3.jpg",
+    "alt": "Mrs. P. Rooba addressing an IMTI batch celebration",
+    "caption": "Institute Events",
+    "uploadedAt": ""
+  },
+  {
+    "section": "Training",
+    "id": "default-2",
+    "src": "/2.jpg",
+    "alt": "Trainee teachers in a hands-on IMTI session",
+    "caption": "Trainee Sessions",
+    "uploadedAt": ""
+  }
+]

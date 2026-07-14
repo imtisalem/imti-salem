@@ -1,0 +1,11 @@
+{
+    "schema_version": 1,
+    "commit": "179dec5f839c7ece4f4651e0d09acb8549937971",
+    "indexed_at": "2026-07-14T08:17:29Z",
+    "project": "Users-kendrick-Developer-imti",
+    "nodes": 483,
+    "edges": 1379,
+    "original_size": 2293760,
+    "compressed_size": 307119,
+    "compression_level": 9
+}
