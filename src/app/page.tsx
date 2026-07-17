@@ -38,6 +38,13 @@ const standardPillars = [
       "While we are rooted in the timeless Montessori method, we also keep a close eye on emerging trends in technology and industry to ensure our educators are prepared for the world of tomorrow.",
     tone: "coral",
   },
+  {
+    number: "04",
+    title: "Inclusive & Special Child Education",
+    description:
+      "Every child deserves equal opportunities to learn, grow, and succeed. Our training introduces future teachers to child-centred strategies that support children with different learning abilities, developmental needs, and educational backgrounds in a positive, respectful environment.",
+    tone: "saffron",
+  },
 ];
 
 const courses = [

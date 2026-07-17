@@ -24,6 +24,10 @@ export const metadata: Metadata = {
     "Pre School Management Course",
     "Montessori Training in Tamil Nadu",
     "Best Montessori Institute in Salem",
+    "Inclusive Education Course",
+    "Special Education Teacher Training",
+    "Autism Teacher Training",
+    "Early Intervention Course",
   ],
   openGraph: {
     title: "IMTI — Indian Montessori Training Institute",

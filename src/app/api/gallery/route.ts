@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAuthorized } from "@/lib/auth";
 import {
-  addGalleryImage,
+  addGalleryImages,
   deleteGalleryImage,
   getGalleryImages,
   updateGalleryImage,
@@ -21,30 +21,42 @@ export async function POST(request: Request) {
   }
 
   const formData = await request.formData();
-  const file = formData.get("file");
+  const files = formData
+    .getAll("files")
+    .filter((f): f is File => f instanceof File && f.size > 0);
   const alt = String(formData.get("alt") ?? "");
   const caption = String(formData.get("caption") ?? "");
   const section = String(formData.get("section") ?? "");
 
-  if (!(file instanceof File) || file.size === 0) {
-    return NextResponse.json({ error: "No file provided" }, { status: 400 });
+  if (files.length === 0) {
+    return NextResponse.json({ error: "No files provided" }, { status: 400 });
   }
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    return NextResponse.json(
-      { error: "Unsupported file type. Use JPG, PNG, WEBP or GIF." },
-      { status: 400 },
-    );
-  }
-  if (file.size > MAX_FILE_SIZE) {
-    return NextResponse.json(
-      { error: "File too large. Max size is 8MB." },
-      { status: 400 },
-    );
+
+  for (const file of files) {
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      return NextResponse.json(
+        {
+          error: `"${file.name}" is not a supported type. Use JPG, PNG, WEBP or GIF.`,
+        },
+        { status: 400 },
+      );
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      return NextResponse.json(
+        { error: `"${file.name}" is too large. Max size is 8MB.` },
+        { status: 400 },
+      );
+    }
   }
 
   try {
-    const image = await addGalleryImage(file, alt, caption, section);
-    return NextResponse.json({ image }, { status: 201 });
+    const { added, skipped } = await addGalleryImages(
+      files,
+      section,
+      caption,
+      alt,
+    );
+    return NextResponse.json({ images: added, skipped }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Upload failed" },

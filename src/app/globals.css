@@ -550,6 +550,18 @@ h2 em {
   padding-top: 40px;
   padding-bottom: 106px;
 }
+.standard .course-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+.standard .course-card h3,
+.standard .course-card p {
+  max-width: 380px;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+.standard .course-card {
+  min-height: 0;
+}
 .courses {
   background: var(--cream);
   max-width: none;
@@ -1331,7 +1343,8 @@ h2 em {
     padding-left: 24px;
     padding-right: 24px;
   }
-  .course-grid {
+  .course-grid,
+  .standard .course-grid {
     grid-template-columns: 1fr;
   }
   .course-card {

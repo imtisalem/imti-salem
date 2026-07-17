@@ -60,7 +60,7 @@ export default function AdminPage() {
     text: string;
   } | null>(null);
 
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadAlt, setUploadAlt] = useState("");
   const [uploadCaption, setUploadCaption] = useState("");
   const [uploadSection, setUploadSection] = useState(SECTIONS[0]);
@@ -151,15 +151,20 @@ export default function AdminPage() {
 
   async function handleUpload(event: React.FormEvent) {
     event.preventDefault();
-    if (!uploadFile) {
-      setMessage({ type: "error", text: "Choose an image to upload first." });
+    if (uploadFiles.length === 0) {
+      setMessage({
+        type: "error",
+        text: "Choose one or more images to upload first.",
+      });
       return;
     }
     setUploading(true);
     setMessage(null);
     try {
       const formData = new FormData();
-      formData.append("file", uploadFile);
+      for (const file of uploadFiles) {
+        formData.append("files", file);
+      }
       formData.append("alt", uploadAlt);
       formData.append("caption", uploadCaption);
       formData.append("section", uploadSection);
@@ -172,12 +177,21 @@ export default function AdminPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Upload failed");
 
-      setImages((prev) => [data.image, ...prev]);
-      setUploadFile(null);
+      const added: GalleryImage[] = data.images ?? [];
+      setImages((prev) => [...added, ...prev]);
+      setUploadFiles([]);
       setUploadAlt("");
       setUploadCaption("");
       if (uploadInputRef.current) uploadInputRef.current.value = "";
-      setMessage({ type: "success", text: "Photo added to the gallery." });
+
+      const skipped = data.skipped ?? 0;
+      setMessage({
+        type: skipped > 0 ? "error" : "success",
+        text:
+          skipped > 0
+            ? `Added ${added.length} photo${added.length === 1 ? "" : "s"}. Skipped ${skipped} — gallery is full (max ${MAX_IMAGES}).`
+            : `Added ${added.length} photo${added.length === 1 ? "" : "s"} to the gallery.`,
+      });
     } catch (err) {
       setMessage({
         type: "error",
@@ -377,19 +391,39 @@ export default function AdminPage() {
         )}
         <form onSubmit={handleUpload} className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor="upload-file">Image file</Label>
+            <Label htmlFor="upload-file">
+              Image files{" "}
+              <span className="font-normal text-muted-foreground">
+                (select multiple to bulk upload)
+              </span>
+            </Label>
             <input
               ref={uploadInputRef}
               id="upload-file"
               type="file"
+              multiple
               accept="image/jpeg,image/png,image/webp,image/gif"
-              onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => setUploadFiles(Array.from(e.target.files ?? []))}
               className="block w-full rounded-3xl border border-border bg-background px-3.5 py-2 text-sm file:mr-3 file:rounded-full file:border-0 file:bg-secondary file:px-3 file:py-1 file:text-sm file:font-medium"
               disabled={atCapacity}
             />
+            {uploadFiles.length > 0 && (
+              <p className="text-muted-foreground text-xs">
+                {uploadFiles.length} file
+                {uploadFiles.length === 1 ? "" : "s"} selected
+                {uploadFiles.length > MAX_IMAGES - images.length
+                  ? ` — only ${Math.max(MAX_IMAGES - images.length, 0)} will fit (gallery limit is ${MAX_IMAGES})`
+                  : ""}
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="upload-caption">Caption</Label>
+            <Label htmlFor="upload-caption">
+              Caption{" "}
+              <span className="font-normal text-muted-foreground">
+                (applied to all, numbered if several)
+              </span>
+            </Label>
             <Input
               id="upload-caption"
               value={uploadCaption}
@@ -435,13 +469,20 @@ export default function AdminPage() {
             </Select>
           </div>
           <div className="sm:col-span-2">
-            <Button type="submit" disabled={uploading || atCapacity}>
+            <Button
+              type="submit"
+              disabled={uploading || atCapacity || uploadFiles.length === 0}
+            >
               {uploading ? (
                 <Loader2 className="animate-spin" size={16} />
               ) : (
                 <Upload size={16} />
               )}
-              {uploading ? "Uploading..." : "Upload photo"}
+              {uploading
+                ? "Uploading..."
+                : uploadFiles.length > 1
+                  ? `Upload ${uploadFiles.length} photos`
+                  : "Upload photo"}
             </Button>
           </div>
         </form>
