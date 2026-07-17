@@ -57,21 +57,21 @@ const courses = [
   },
   {
     number: "02",
-    title: "BSS Diploma in Nursery Education",
+    title: "Diploma in Nursery Education",
     description:
       "Child development, classroom management, activity-based learning and preschool teaching methods.",
     tone: "blue",
   },
   {
     number: "03",
-    title: "BSS Diploma in Primary Education",
+    title: "Diploma in Primary Education",
     description:
       "Primary-level teaching methodologies and child-centered education for aspiring primary teachers.",
     tone: "coral",
   },
   {
     number: "04",
-    title: "BSS Diploma in Creche and Pre-School Management",
+    title: "Diploma in Creche and Pre-School Management",
     description:
       "Preschool administration, daycare management, child safety, nutrition and communication.",
     tone: "saffron",
@@ -85,7 +85,7 @@ const courses = [
   },
   {
     number: "06",
-    title: "BSS Diploma in Early Childhood Care and Education",
+    title: "Diploma in Early Childhood Care and Education",
     description:
       "Holistic child development, psychology, learning methods and health education.",
     tone: "coral",
