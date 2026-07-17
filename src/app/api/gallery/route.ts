@@ -7,7 +7,9 @@ import {
   updateGalleryImage,
 } from "@/lib/gallery";
 
-const MAX_FILE_SIZE = 8 * 1024 * 1024;
+// Vercel's serverless functions reject request bodies over ~4.5MB before
+// our code even runs, so we stay well under that per request.
+const MAX_FILE_SIZE = 4 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
 export async function GET() {
@@ -43,7 +45,7 @@ export async function POST(request: Request) {
     }
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
-        { error: `"${file.name}" is too large. Max size is 8MB.` },
+        { error: `"${file.name}" is too large. Max size is 4MB.` },
         { status: 400 },
       );
     }
@@ -100,7 +102,7 @@ export async function PATCH(request: Request) {
     }
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
-        { error: "File too large. Max size is 8MB." },
+        { error: "File too large. Max size is 4MB." },
         { status: 400 },
       );
     }

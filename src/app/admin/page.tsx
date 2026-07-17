@@ -40,7 +40,30 @@ const SECTIONS = [
 ];
 
 const MAX_IMAGES = 20;
+const MAX_FILE_SIZE = 4 * 1024 * 1024;
 const CREDENTIALS_KEY = "imti-admin-credentials";
+
+// The server always responds with JSON, but the platform itself can reject
+// a request before our code runs (e.g. "Request Entity Too Large" as plain
+// text). Parse defensively so that never crashes the UI with a raw
+// "Unexpected token" error.
+async function parseJsonResponse(
+  res: Response,
+): Promise<{ error?: string; [key: string]: unknown }> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (!res.ok) {
+      const label =
+        res.status === 413
+          ? "File too large for the server to accept."
+          : `Request failed (HTTP ${res.status}).`;
+      return { error: label };
+    }
+    return {};
+  }
+}
 
 export default function AdminPage() {
   const [checkingSession, setCheckingSession] = useState(true);
@@ -73,8 +96,8 @@ export default function AdminPage() {
     setLoading(true);
     try {
       const res = await fetch("/api/gallery");
-      const data = await res.json();
-      setImages(data.images ?? []);
+      const data = await parseJsonResponse(res);
+      setImages((data.images as GalleryImage[]) ?? []);
     } catch {
       setMessage({ type: "error", text: "Could not load the gallery." });
     } finally {
@@ -160,46 +183,74 @@ export default function AdminPage() {
     }
     setUploading(true);
     setMessage(null);
-    try {
-      const formData = new FormData();
-      for (const file of uploadFiles) {
+
+    // Upload one file per request. Bundling many files into a single
+    // request can exceed Vercel's serverless request-body limit (~4.5MB),
+    // which gets rejected before our code even runs — this sidesteps that.
+    const added: GalleryImage[] = [];
+    let skipped = 0;
+    let failure: string | null = null;
+
+    for (let i = 0; i < uploadFiles.length; i++) {
+      const file = uploadFiles[i];
+      const suffix = uploadFiles.length > 1 ? ` ${i + 1}` : "";
+      try {
+        const formData = new FormData();
         formData.append("files", file);
+        formData.append("alt", uploadAlt ? `${uploadAlt}${suffix}` : "");
+        formData.append(
+          "caption",
+          uploadCaption ? `${uploadCaption}${suffix}` : "",
+        );
+        formData.append("section", uploadSection);
+
+        const res = await fetch("/api/gallery", {
+          method: "POST",
+          headers: authHeaders(),
+          body: formData,
+        });
+        const data = await parseJsonResponse(res);
+        if (!res.ok) throw new Error(data.error ?? "Upload failed");
+
+        const batchImages = (data.images as GalleryImage[]) ?? [];
+        const batchSkipped = (data.skipped as number) ?? 0;
+        added.push(...batchImages);
+        skipped += batchSkipped;
+        if (batchSkipped > 0) break; // gallery is full; stop early
+      } catch (err) {
+        failure = `"${file.name}": ${err instanceof Error ? err.message : "Upload failed"}`;
+        break;
       }
-      formData.append("alt", uploadAlt);
-      formData.append("caption", uploadCaption);
-      formData.append("section", uploadSection);
+    }
 
-      const res = await fetch("/api/gallery", {
-        method: "POST",
-        headers: authHeaders(),
-        body: formData,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Upload failed");
-
-      const added: GalleryImage[] = data.images ?? [];
+    if (added.length > 0) {
       setImages((prev) => [...added, ...prev]);
-      setUploadFiles([]);
-      setUploadAlt("");
-      setUploadCaption("");
-      if (uploadInputRef.current) uploadInputRef.current.value = "";
+    }
+    setUploadFiles([]);
+    setUploadAlt("");
+    setUploadCaption("");
+    if (uploadInputRef.current) uploadInputRef.current.value = "";
 
-      const skipped = data.skipped ?? 0;
-      setMessage({
-        type: skipped > 0 ? "error" : "success",
-        text:
-          skipped > 0
-            ? `Added ${added.length} photo${added.length === 1 ? "" : "s"}. Skipped ${skipped} — gallery is full (max ${MAX_IMAGES}).`
-            : `Added ${added.length} photo${added.length === 1 ? "" : "s"} to the gallery.`,
-      });
-    } catch (err) {
+    if (failure) {
       setMessage({
         type: "error",
-        text: err instanceof Error ? err.message : "Upload failed",
+        text:
+          added.length > 0
+            ? `Added ${added.length} photo${added.length === 1 ? "" : "s"}, then failed on ${failure}`
+            : `Upload failed on ${failure}`,
       });
-    } finally {
-      setUploading(false);
+    } else if (skipped > 0) {
+      setMessage({
+        type: "error",
+        text: `Added ${added.length} photo${added.length === 1 ? "" : "s"}. Skipped ${skipped} — gallery is full (max ${MAX_IMAGES}).`,
+      });
+    } else {
+      setMessage({
+        type: "success",
+        text: `Added ${added.length} photo${added.length === 1 ? "" : "s"} to the gallery.`,
+      });
     }
+    setUploading(false);
   }
 
   async function handleUpdate(
@@ -223,11 +274,12 @@ export default function AdminPage() {
         headers: authHeaders(),
         body: formData,
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error ?? "Update failed");
 
+      const updatedImage = data.image as GalleryImage;
       setImages((prev) =>
-        prev.map((img) => (img.id === id ? data.image : img)),
+        prev.map((img) => (img.id === id ? updatedImage : img)),
       );
       setMessage({ type: "success", text: "Photo updated." });
     } catch (err) {
@@ -250,7 +302,7 @@ export default function AdminPage() {
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ id }),
       });
-      const data = await res.json();
+      const data = await parseJsonResponse(res);
       if (!res.ok) throw new Error(data.error ?? "Delete failed");
 
       setImages((prev) => prev.filter((img) => img.id !== id));
@@ -403,7 +455,19 @@ export default function AdminPage() {
               type="file"
               multiple
               accept="image/jpeg,image/png,image/webp,image/gif"
-              onChange={(e) => setUploadFiles(Array.from(e.target.files ?? []))}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                const tooBig = files.filter((f) => f.size > MAX_FILE_SIZE);
+                setUploadFiles(files.filter((f) => f.size <= MAX_FILE_SIZE));
+                if (tooBig.length > 0) {
+                  setMessage({
+                    type: "error",
+                    text: `Skipped ${tooBig.length} file${tooBig.length === 1 ? "" : "s"} over 4MB: ${tooBig.map((f) => f.name).join(", ")}`,
+                  });
+                } else {
+                  setMessage(null);
+                }
+              }}
               className="block w-full rounded-3xl border border-border bg-background px-3.5 py-2 text-sm file:mr-3 file:rounded-full file:border-0 file:bg-secondary file:px-3 file:py-1 file:text-sm file:font-medium"
               disabled={atCapacity}
             />

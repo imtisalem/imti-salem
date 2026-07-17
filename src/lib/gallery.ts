@@ -70,6 +70,15 @@ const DEFAULT_IMAGES: GalleryImage[] = [
   },
 ];
 
+function describeBlobError(err: unknown): Error {
+  console.error("[gallery] Vercel Blob operation failed:", err);
+  const raw = err instanceof Error ? err.message : String(err);
+  return new Error(
+    `Storage error (${raw}). Check that a Blob store is connected to this ` +
+      "project in Vercel → Storage, and that you redeployed after connecting it.",
+  );
+}
+
 function parseImages(raw: string): GalleryImage[] {
   const parsed = JSON.parse(raw);
   if (!Array.isArray(parsed)) return DEFAULT_IMAGES;
@@ -81,7 +90,12 @@ function parseImages(raw: string): GalleryImage[] {
 
 async function readManifest(): Promise<GalleryImage[]> {
   if (USE_BLOB) {
-    const { blobs } = await list({ prefix: MANIFEST_PATHNAME, limit: 1 });
+    let blobs: Awaited<ReturnType<typeof list>>["blobs"];
+    try {
+      ({ blobs } = await list({ prefix: MANIFEST_PATHNAME, limit: 1 }));
+    } catch (err) {
+      throw describeBlobError(err);
+    }
     const match = blobs.find((b) => b.pathname === MANIFEST_PATHNAME);
     if (!match) return DEFAULT_IMAGES;
     const res = await fetch(match.url, { cache: "no-store" });
@@ -110,12 +124,16 @@ async function readManifest(): Promise<GalleryImage[]> {
 async function writeManifest(images: GalleryImage[]): Promise<void> {
   const body = JSON.stringify(images, null, 2);
   if (USE_BLOB) {
-    await put(MANIFEST_PATHNAME, body, {
-      access: "public",
-      contentType: "application/json",
-      addRandomSuffix: false,
-      allowOverwrite: true,
-    });
+    try {
+      await put(MANIFEST_PATHNAME, body, {
+        access: "public",
+        contentType: "application/json",
+        addRandomSuffix: false,
+        allowOverwrite: true,
+      });
+    } catch (err) {
+      throw describeBlobError(err);
+    }
     return;
   }
   await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
@@ -125,13 +143,17 @@ async function writeManifest(images: GalleryImage[]): Promise<void> {
 async function saveFile(filename: string, file: File): Promise<string> {
   const buffer = Buffer.from(await file.arrayBuffer());
   if (USE_BLOB) {
-    const blob = await put(`${BLOB_UPLOAD_PREFIX}/${filename}`, buffer, {
-      access: "public",
-      contentType: file.type,
-      addRandomSuffix: false,
-      allowOverwrite: true,
-    });
-    return blob.url;
+    try {
+      const blob = await put(`${BLOB_UPLOAD_PREFIX}/${filename}`, buffer, {
+        access: "public",
+        contentType: file.type,
+        addRandomSuffix: false,
+        allowOverwrite: true,
+      });
+      return blob.url;
+    } catch (err) {
+      throw describeBlobError(err);
+    }
   }
   await fs.mkdir(UPLOAD_DIR, { recursive: true });
   await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer);
@@ -141,7 +163,9 @@ async function saveFile(filename: string, file: File): Promise<string> {
 async function deleteFile(src: string): Promise<void> {
   if (USE_BLOB) {
     if (src.includes(".blob.vercel-storage.com/")) {
-      await del(src).catch(() => {});
+      await del(src).catch((err) => {
+        console.error("[gallery] Failed to delete blob:", err);
+      });
     }
     return;
   }

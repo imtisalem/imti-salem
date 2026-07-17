@@ -156,6 +156,10 @@ const methodology = [
   "Interactive learning sessions",
 ];
 
+// Force this page to render per-request rather than being prerendered at
+// build time, so newly uploaded gallery photos show up without a redeploy.
+export const dynamic = "force-dynamic";
+
 export default async function Home() {
   const gallery = (await getGalleryImages()).slice(0, 20);
   return (
