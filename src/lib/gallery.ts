@@ -1,6 +1,5 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { del, list, put } from "@vercel/blob";
 
 export type GalleryImage = {
   id: string;
@@ -21,15 +20,6 @@ export const GALLERY_SECTIONS = [
 ] as const;
 
 export const MAX_GALLERY_IMAGES = 20;
-
-// Vercel's serverless functions run on a read-only filesystem, so writing to
-// public/uploads only works in local dev. In production (or whenever a Blob
-// store is connected) we persist everything — the manifest JSON and the
-// image files — in Vercel Blob instead.
-const USE_BLOB = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-
-const MANIFEST_PATHNAME = "gallery/manifest.json";
-const BLOB_UPLOAD_PREFIX = "gallery/uploads";
 
 const DATA_FILE = path.join(process.cwd(), "data", "gallery.json");
 const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
@@ -70,15 +60,6 @@ const DEFAULT_IMAGES: GalleryImage[] = [
   },
 ];
 
-function describeBlobError(err: unknown): Error {
-  console.error("[gallery] Vercel Blob operation failed:", err);
-  const raw = err instanceof Error ? err.message : String(err);
-  return new Error(
-    `Storage error (${raw}). Check that a Blob store is connected to this ` +
-      "project in Vercel → Storage, and that you redeployed after connecting it.",
-  );
-}
-
 function parseImages(raw: string): GalleryImage[] {
   const parsed = JSON.parse(raw);
   if (!Array.isArray(parsed)) return DEFAULT_IMAGES;
@@ -88,31 +69,17 @@ function parseImages(raw: string): GalleryImage[] {
   })) as GalleryImage[];
 }
 
-async function readManifest(): Promise<GalleryImage[]> {
-  if (USE_BLOB) {
-    let blobs: Awaited<ReturnType<typeof list>>["blobs"];
-    try {
-      ({ blobs } = await list({ prefix: MANIFEST_PATHNAME, limit: 1 }));
-    } catch (err) {
-      throw describeBlobError(err);
-    }
-    const match = blobs.find((b) => b.pathname === MANIFEST_PATHNAME);
-    if (!match) return DEFAULT_IMAGES;
-    const res = await fetch(match.url, { cache: "no-store" });
-    if (!res.ok) return DEFAULT_IMAGES;
-    try {
-      return parseImages(await res.text());
-    } catch {
-      return DEFAULT_IMAGES;
-    }
-  }
-
+async function ensureDataFile() {
   await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
   try {
     await fs.access(DATA_FILE);
   } catch {
     await fs.writeFile(DATA_FILE, JSON.stringify(DEFAULT_IMAGES, null, 2));
   }
+}
+
+export async function getGalleryImages(): Promise<GalleryImage[]> {
+  await ensureDataFile();
   const raw = await fs.readFile(DATA_FILE, "utf-8");
   try {
     return parseImages(raw);
@@ -121,62 +88,9 @@ async function readManifest(): Promise<GalleryImage[]> {
   }
 }
 
-async function writeManifest(images: GalleryImage[]): Promise<void> {
-  const body = JSON.stringify(images, null, 2);
-  if (USE_BLOB) {
-    try {
-      await put(MANIFEST_PATHNAME, body, {
-        access: "public",
-        contentType: "application/json",
-        addRandomSuffix: false,
-        allowOverwrite: true,
-      });
-    } catch (err) {
-      throw describeBlobError(err);
-    }
-    return;
-  }
-  await fs.mkdir(path.dirname(DATA_FILE), { recursive: true });
-  await fs.writeFile(DATA_FILE, body);
-}
-
-async function saveFile(filename: string, file: File): Promise<string> {
-  const buffer = Buffer.from(await file.arrayBuffer());
-  if (USE_BLOB) {
-    try {
-      const blob = await put(`${BLOB_UPLOAD_PREFIX}/${filename}`, buffer, {
-        access: "public",
-        contentType: file.type,
-        addRandomSuffix: false,
-        allowOverwrite: true,
-      });
-      return blob.url;
-    } catch (err) {
-      throw describeBlobError(err);
-    }
-  }
-  await fs.mkdir(UPLOAD_DIR, { recursive: true });
-  await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer);
-  return `${UPLOAD_URL_PREFIX}/${filename}`;
-}
-
-async function deleteFile(src: string): Promise<void> {
-  if (USE_BLOB) {
-    if (src.includes(".blob.vercel-storage.com/")) {
-      await del(src).catch((err) => {
-        console.error("[gallery] Failed to delete blob:", err);
-      });
-    }
-    return;
-  }
-  if (src.startsWith(UPLOAD_URL_PREFIX)) {
-    const filePath = path.join(process.cwd(), "public", src);
-    await fs.unlink(filePath).catch(() => {});
-  }
-}
-
-export async function getGalleryImages(): Promise<GalleryImage[]> {
-  return readManifest();
+async function saveGalleryImages(images: GalleryImage[]) {
+  await ensureDataFile();
+  await fs.writeFile(DATA_FILE, JSON.stringify(images, null, 2));
 }
 
 export async function addGalleryImages(
@@ -185,10 +99,14 @@ export async function addGalleryImages(
   captionBase: string,
   altBase: string,
 ): Promise<{ added: GalleryImage[]; skipped: number }> {
-  const images = await readManifest();
+  const images = await getGalleryImages();
   const capacity = Math.max(MAX_GALLERY_IMAGES - images.length, 0);
   const toAdd = files.slice(0, capacity);
   const skipped = files.length - toAdd.length;
+
+  if (toAdd.length > 0) {
+    await fs.mkdir(UPLOAD_DIR, { recursive: true });
+  }
 
   const added: GalleryImage[] = [];
   const resolvedSection = section.trim() || "Other";
@@ -197,7 +115,8 @@ export async function addGalleryImages(
     const ext = path.extname(file.name).toLowerCase() || ".jpg";
     const id = `img-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
     const filename = `${id}${ext}`;
-    const src = await saveFile(filename, file);
+    const buffer = Buffer.from(await file.arrayBuffer());
+    await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer);
 
     const suffix = toAdd.length > 1 ? ` ${i + 1}` : "";
     const fileBaseName = path
@@ -207,7 +126,7 @@ export async function addGalleryImages(
 
     added.push({
       id,
-      src,
+      src: `${UPLOAD_URL_PREFIX}/${filename}`,
       alt:
         (altBase.trim() || fileBaseName || `IMTI ${resolvedSection} photo`) +
         suffix,
@@ -219,7 +138,7 @@ export async function addGalleryImages(
 
   if (added.length > 0) {
     images.unshift(...added);
-    await writeManifest(images);
+    await saveGalleryImages(images);
   }
 
   return { added, skipped };
@@ -229,7 +148,7 @@ export async function updateGalleryImage(
   id: string,
   updates: { alt?: string; caption?: string; section?: string; file?: File },
 ): Promise<GalleryImage | null> {
-  const images = await readManifest();
+  const images = await getGalleryImages();
   const index = images.findIndex((image) => image.id === id);
   if (index === -1) return null;
 
@@ -237,11 +156,17 @@ export async function updateGalleryImage(
   let src = current.src;
 
   if (updates.file) {
+    await fs.mkdir(UPLOAD_DIR, { recursive: true });
     const ext = path.extname(updates.file.name).toLowerCase() || ".jpg";
     const filename = `${id}-${Date.now()}${ext}`;
-    const newSrc = await saveFile(filename, updates.file);
-    await deleteFile(current.src);
-    src = newSrc;
+    const buffer = Buffer.from(await updates.file.arrayBuffer());
+    await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer);
+
+    if (current.src.startsWith(UPLOAD_URL_PREFIX)) {
+      const oldPath = path.join(process.cwd(), "public", current.src);
+      await fs.unlink(oldPath).catch(() => {});
+    }
+    src = `${UPLOAD_URL_PREFIX}/${filename}`;
   }
 
   const updated: GalleryImage = {
@@ -252,17 +177,18 @@ export async function updateGalleryImage(
     section: updates.section?.trim() || current.section,
   };
   images[index] = updated;
-  await writeManifest(images);
+  await saveGalleryImages(images);
   return updated;
 }
 
 export async function deleteGalleryImage(id: string): Promise<void> {
-  const images = await readManifest();
+  const images = await getGalleryImages();
   const target = images.find((image) => image.id === id);
   const remaining = images.filter((image) => image.id !== id);
-  await writeManifest(remaining);
+  await saveGalleryImages(remaining);
 
-  if (target) {
-    await deleteFile(target.src);
+  if (target?.src.startsWith(UPLOAD_URL_PREFIX)) {
+    const filePath = path.join(process.cwd(), "public", target.src);
+    await fs.unlink(filePath).catch(() => {});
   }
 }
